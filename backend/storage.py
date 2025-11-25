@@ -156,6 +156,60 @@ def add_assistant_message(
     save_conversation(conversation)
 
 
+def get_message(conversation_id: str, message_index: int) -> Optional[Dict[str, Any]]:
+    """
+    Get a specific message by index within a conversation.
+
+    Args:
+        conversation_id: Conversation identifier
+        message_index: Zero-based index of the message in the messages list
+
+    Returns:
+        The message dict if found, otherwise None
+    """
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        return None
+
+    messages = conversation.get("messages", [])
+    if message_index < 0 or message_index >= len(messages):
+        return None
+    return messages[message_index]
+
+
+def update_message(conversation_id: str, message_index: int, updates: Dict[str, Any]) -> bool:
+    """
+    Update an existing message in a conversation.
+
+    Performs a shallow update of the message dict with the provided keys.
+
+    Args:
+        conversation_id: Conversation identifier
+        message_index: Zero-based index of the message to update
+        updates: Dict of fields to update/merge into the message
+
+    Returns:
+        True if updated successfully, False if not found
+    """
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        return False
+
+    messages = conversation.get("messages", [])
+    if message_index < 0 or message_index >= len(messages):
+        return False
+
+    # Merge updates into the message
+    current = messages[message_index]
+    if not isinstance(current, dict):
+        return False
+
+    current.update(updates)
+
+    save_conversation(conversation)
+    return True
+
+
 def update_conversation_title(conversation_id: str, title: str):
     """
     Update the title of a conversation.
@@ -170,3 +224,21 @@ def update_conversation_title(conversation_id: str, title: str):
 
     conversation["title"] = title
     save_conversation(conversation)
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """
+    Delete a conversation file.
+
+    Args:
+        conversation_id: Conversation identifier
+
+    Returns:
+        True if deleted, False if not found
+    """
+    ensure_data_dir()
+    path = get_conversation_path(conversation_id)
+    if not os.path.exists(path):
+        return False
+    os.remove(path)
+    return True

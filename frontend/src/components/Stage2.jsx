@@ -14,7 +14,7 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
-export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
+export default function Stage2({ rankings, labelToModel, aggregateRankings, onRerun, disabled = false, loadingModel = null }) {
   const [activeTab, setActiveTab] = useState(0);
 
   if (!rankings || rankings.length === 0) {
@@ -52,22 +52,40 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
             {deAnonymizeText(rankings[activeTab].ranking, labelToModel)}
           </ReactMarkdown>
         </div>
-
-        {rankings[activeTab].parsed_ranking &&
-         rankings[activeTab].parsed_ranking.length > 0 && (
-          <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
-            <ol>
-              {rankings[activeTab].parsed_ranking.map((label, i) => (
-                <li key={i}>
-                  {labelToModel && labelToModel[label]
-                    ? labelToModel[label].split('/')[1] || labelToModel[label]
-                    : label}
-                </li>
-              ))}
-            </ol>
+        {onRerun && (
+          <div className="actions" style={{ marginTop: 8 }}>
+            <button
+              className="icon-button"
+              onClick={() => onRerun(rankings[activeTab].model)}
+              disabled={disabled || loadingModel === rankings[activeTab].model}
+              aria-label="Rerun ranking"
+              aria-busy={loadingModel === rankings[activeTab].model}
+            >
+              {loadingModel === rankings[activeTab].model ? 'Regenerating…' : 'Rerun'}
+            </button>
+            {loadingModel === rankings[activeTab].model && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }} aria-live="polite">
+                <span className="spinner" style={{ width: 16, height: 16 }} />
+              </span>
+            )}
           </div>
         )}
+
+        {rankings[activeTab].parsed_ranking &&
+          rankings[activeTab].parsed_ranking.length > 0 && (
+            <div className="parsed-ranking">
+              <strong>Extracted Ranking:</strong>
+              <ol>
+                {rankings[activeTab].parsed_ranking.map((label, i) => (
+                  <li key={i}>
+                    {labelToModel && labelToModel[label]
+                      ? labelToModel[label].split('/')[1] || labelToModel[label]
+                      : label}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
       </div>
 
       {aggregateRankings && aggregateRankings.length > 0 && (

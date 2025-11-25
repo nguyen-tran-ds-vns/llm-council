@@ -32,6 +32,24 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     return stage1_results
 
 
+async def run_stage1_for_model(user_query: str, model_name: str) -> Dict[str, Any]:
+    """
+    Run Stage 1 for a single model.
+
+    Args:
+        user_query: The user's question
+        model_name: Model identifier to query
+
+    Returns:
+        Dict with 'model' and 'response' keys (empty response if failure)
+    """
+    messages = [{"role": "user", "content": user_query}]
+    response = await query_model(model_name, messages)
+    if response is None:
+        return {"model": model_name, "response": ""}
+    return {"model": model_name, "response": response.get("content", "")}
+
+
 async def stage2_collect_rankings(
     user_query: str,
     stage1_results: List[Dict[str, Any]]
@@ -110,6 +128,59 @@ Now provide your evaluation and ranking:"""
             })
 
     return stage2_results, label_to_model
+
+
+async def run_stage2_for_model(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+    model_name: str,
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """
+    Run Stage 2 ranking using a single model.
+
+    Returns:
+      A tuple of (ranking_entry, label_to_model mapping)
+    """
+    labels = [chr(65 + i) for i in range(len(stage1_results))]
+    label_to_model = {
+        f"Response {label}": result['model']
+        for label, result in zip(labels, stage1_results)
+    }
+
+    responses_text = "\n\n".join([
+        f"Response {label}:\n{result['response']}"
+        for label, result in zip(labels, stage1_results)
+    ])
+
+    ranking_prompt = f"""You are evaluating different responses to the following question:
+
+Question: {user_query}
+
+Here are the responses from different models (anonymized):
+
+{responses_text}
+
+Your task:
+1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
+2. Then, at the very end of your response, provide a final ranking.
+
+IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
+- Start with the line "FINAL RANKING:" (all caps, with colon)
+- Then list the responses from best to worst as a numbered list
+- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
+- Do not add any other text or explanations in the ranking section
+
+Now provide your evaluation and ranking:"""
+
+    messages = [{"role": "user", "content": ranking_prompt}]
+    response = await query_model(model_name, messages)
+    if response is None:
+        return ({"model": model_name, "ranking": "", "parsed_ranking": []}, label_to_model)
+
+    full_text = response.get('content', '')
+    parsed = parse_ranking_from_text(full_text)
+    entry = {"model": model_name, "ranking": full_text, "parsed_ranking": parsed}
+    return (entry, label_to_model)
 
 
 async def stage3_synthesize_final(

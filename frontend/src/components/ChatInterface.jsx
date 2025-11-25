@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
@@ -9,6 +9,23 @@ export default function ChatInterface({
   conversation,
   onSendMessage,
   isLoading,
+  executionMode,
+  onContinue,
+  onEditUserMessage,
+  onRerunStage1Model,
+  onRerunStage2Model,
+  onRerunStage3,
+  onSetMode,
+  theme,
+  onToggleTheme,
+  editingPrompt,
+  editPromptText,
+  onEditChange,
+  onEditSave,
+  onEditCancel,
+  rerunStage1ModelLoading,
+  rerunStage2ModelLoading,
+  rerunStage3Loading,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -50,6 +67,30 @@ export default function ChatInterface({
 
   return (
     <div className="chat-interface">
+      <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
+        <div>
+          <label style={{ marginRight: 8 }}>Execution Mode:</label>
+          <select value={executionMode} onChange={(e) => onSetMode?.(e.target.value)}>
+            <option value="auto">Auto</option>
+            <option value="step">Step-by-step</option>
+          </select>
+        </div>
+        <div className="toggle" aria-label="Theme toggle" style={{ alignItems: 'center' }}>
+          <span style={{ fontSize: 'var(--font-size-sm)', marginRight: 8 }}>Theme:</span>
+          <button
+            type="button"
+            className="toggle-switch"
+            role="switch"
+            aria-checked={theme === 'dark'}
+            aria-label="Toggle dark mode"
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <span className="thumb" aria-hidden="true" />
+          </button>
+          <span style={{ fontSize: 'var(--font-size-sm)', marginLeft: 8 }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+        </div>
+      </div>
       <div className="messages-container">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
@@ -63,9 +104,37 @@ export default function ChatInterface({
                 <div className="user-message">
                   <div className="message-label">You</div>
                   <div className="message-content">
-                    <div className="markdown-content">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
+                    {editingPrompt && index === conversation.messages.length - 2 ? (
+                      <div className="prompt-edit">
+                        <textarea
+                          className="input"
+                          value={editPromptText}
+                          onChange={(e) => onEditChange?.(e.target.value)}
+                          disabled={isLoading}
+                          rows={4}
+                          style={{ width: '100%', minHeight: 80 }}
+                          aria-label="Edit prompt"
+                          onKeyDown={(e) => {
+                            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onEditSave?.(editPromptText)
+                          }}
+                        />
+                        <div className="dialog-actions" style={{ marginTop: 8 }}>
+                          <button className="btn primary" onClick={() => onEditSave?.(editPromptText)} disabled={isLoading}>Save and Rerun</button>
+                          <button className="btn" onClick={onEditCancel} disabled={isLoading}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="markdown-content">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                        {index === conversation.messages.length - 2 && (
+                          <div style={{ marginTop: 8 }}>
+                            <button className="icon-button" onClick={onEditUserMessage} disabled={isLoading} aria-label="Edit prompt" title="Edit prompt">Edit</button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -79,7 +148,14 @@ export default function ChatInterface({
                       <span>Running Stage 1: Collecting individual responses...</span>
                     </div>
                   )}
-                  {msg.stage1 && <Stage1 responses={msg.stage1} />}
+                  {msg.stage1 && (
+                    <Stage1
+                      responses={msg.stage1}
+                      onRerun={(model) => onRerunStage1Model?.(model)}
+                      disabled={isLoading}
+                      loadingModel={rerunStage1ModelLoading}
+                    />
+                  )}
 
                   {/* Stage 2 */}
                   {msg.loading?.stage2 && (
@@ -93,6 +169,9 @@ export default function ChatInterface({
                       rankings={msg.stage2}
                       labelToModel={msg.metadata?.label_to_model}
                       aggregateRankings={msg.metadata?.aggregate_rankings}
+                      onRerun={(model) => onRerunStage2Model?.(model)}
+                      disabled={isLoading}
+                      loadingModel={rerunStage2ModelLoading}
                     />
                   )}
 
@@ -103,7 +182,21 @@ export default function ChatInterface({
                       <span>Running Stage 3: Final synthesis...</span>
                     </div>
                   )}
-                  {msg.stage3 && <Stage3 finalResponse={msg.stage3} />}
+                  {msg.stage3 && (
+                    <Stage3
+                      finalResponse={msg.stage3}
+                      onRerun={() => onRerunStage3?.()}
+                      disabled={isLoading || rerunStage3Loading}
+                      loading={rerunStage3Loading}
+                    />
+                  )}
+
+                  {msg.paused && (
+                    <div className="stage-loading" style={{ marginTop: 12 }}>
+                      <span>Execution paused after {msg.pausedStage}. Continue to next stage?</span>
+                      <button className="icon-button" style={{ marginLeft: 8 }} onClick={onContinue} disabled={isLoading}>Continue</button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -9,18 +9,35 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [executionMode, setExecutionMode] = useState('auto');
+  const [theme, setTheme] = useState('light');
+  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
+  const [editPromptText, setEditPromptText] = useState('');
+  const [rerunStage1ModelLoading, setRerunStage1ModelLoading] = useState(null);
+  const [rerunStage2ModelLoading, setRerunStage2ModelLoading] = useState(null);
+  const [rerunStage3Loading, setRerunStage3Loading] = useState(false);
 
-  // Load conversations on mount
   useEffect(() => {
-    loadConversations();
+    try {
+      const stored = localStorage.getItem('theme');
+      const initial = stored || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      setTheme(initial);
+      document.documentElement.setAttribute('data-theme', initial);
+    } catch {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
   }, []);
 
-  // Load conversation details when selected
-  useEffect(() => {
-    if (currentConversationId) {
-      loadConversation(currentConversationId);
+  const handleToggleTheme = () => {
+    try {
+      const next = theme === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    } catch (err) {
+      console.error('Failed to toggle theme:', err);
     }
-  }, [currentConversationId]);
+  };
 
   const loadConversations = async () => {
     try {
@@ -40,6 +57,16 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  useEffect(() => {
+    if (currentConversationId) {
+      loadConversation(currentConversationId);
+    }
+  }, [currentConversationId]);
+
   const handleNewConversation = async () => {
     try {
       const newConv = await api.createConversation();
@@ -55,6 +82,24 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+  };
+
+  const handleDeleteConversation = async (id) => {
+    const prevConvs = conversations;
+    // Optimistic update: remove locally
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (currentConversationId === id) {
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+    }
+    try {
+      const res = await api.deleteConversation(id);
+      return { ok: true, res };
+    } catch (error) {
+      // Revert on failure
+      setConversations(prevConvs);
+      return { ok: false, error };
+    }
   };
 
   const handleSendMessage = async (content) => {
@@ -90,8 +135,11 @@ function App() {
       }));
 
       // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
-        switch (eventType) {
+      await api.sendMessageStream(
+        currentConversationId,
+        content,
+        (eventType, event) => {
+          switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
               const messages = [...prev.messages];
@@ -161,6 +209,18 @@ function App() {
             setIsLoading(false);
             break;
 
+          case 'paused':
+            setCurrentConversation((prev) => {
+              const messages = [...prev.messages];
+              const lastMsg = messages[messages.length - 1];
+              lastMsg.paused = true;
+              lastMsg.pausedStage = event.stage;
+              lastMsg.loading = { ...(lastMsg.loading || {}), stage1: false, stage2: false, stage3: false };
+              return { ...prev, messages };
+            });
+            setIsLoading(false);
+            break;
+
           case 'error':
             console.error('Stream error:', event.message);
             setIsLoading(false);
@@ -169,7 +229,9 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      },
+      executionMode
+      );
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
@@ -181,6 +243,127 @@ function App() {
     }
   };
 
+  const handleContinue = async () => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    try {
+      const res = await api.continueStage(currentConversationId, msgIndex);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        const lastMsg = messages[messages.length - 1];
+        if (res.stage === 'stage2') {
+          lastMsg.stage2 = res.data;
+          lastMsg.metadata = res.metadata;
+        } else if (res.stage === 'stage3') {
+          lastMsg.stage3 = res.data;
+        }
+        lastMsg.paused = res.stage !== 'complete';
+        lastMsg.pausedStage = res.stage;
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to continue:', error);
+    }
+  };
+
+  const startEditPrompt = () => {
+    if (!currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    const userIndex = msgIndex - 1;
+    const currentText = currentConversation.messages[userIndex]?.content || '';
+    setEditPromptText(currentText);
+    setIsEditingPrompt(true);
+  };
+
+  const saveEditedPrompt = async (newText) => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1; // assistant message index
+    const userIndex = msgIndex - 1;
+    try {
+      setIsLoading(true);
+      const res = await api.rerunFull(currentConversationId, msgIndex, newText);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        messages[userIndex] = { ...messages[userIndex], content: newText };
+        const lastMsg = messages[messages.length - 1];
+        lastMsg.stage1 = res.stage1;
+        lastMsg.stage2 = res.stage2;
+        lastMsg.stage3 = res.stage3;
+        lastMsg.metadata = res.metadata;
+        lastMsg.paused = false;
+        lastMsg.pausedStage = undefined;
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to rerun with edited prompt:', error);
+    } finally {
+      setIsLoading(false);
+      setIsEditingPrompt(false);
+    }
+  };
+
+  const cancelEditPrompt = () => {
+    setIsEditingPrompt(false);
+  };
+
+  const handleRerunStage1Model = async (modelName) => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    try {
+      setRerunStage1ModelLoading(modelName);
+      const res = await api.rerunStage1Model(currentConversationId, msgIndex, modelName);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        const lastMsg = messages[messages.length - 1];
+        lastMsg.stage1 = res.stage1;
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to rerun Stage 1 model:', error);
+    } finally {
+      setRerunStage1ModelLoading(null);
+    }
+  };
+
+  const handleRerunStage2Model = async (modelName) => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    try {
+      setRerunStage2ModelLoading(modelName);
+      const res = await api.rerunStage2Model(currentConversationId, msgIndex, modelName);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        const lastMsg = messages[messages.length - 1];
+        lastMsg.stage2 = res.stage2;
+        lastMsg.metadata = res.metadata;
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to rerun Stage 2 model:', error);
+    } finally {
+      setRerunStage2ModelLoading(null);
+    }
+  };
+
+  const handleRerunStage3 = async () => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    try {
+      setRerunStage3Loading(true);
+      const res = await api.rerunStage3(currentConversationId, msgIndex);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        const lastMsg = messages[messages.length - 1];
+        lastMsg.stage3 = res.stage3;
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to rerun Stage 3:', error);
+    } finally {
+      setRerunStage3Loading(false);
+    }
+  };
+
   return (
     <div className="app">
       <Sidebar
@@ -188,12 +371,31 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        executionMode={executionMode}
+        onContinue={handleContinue}
+        onEditUserMessage={startEditPrompt}
+        onRerunStage1Model={handleRerunStage1Model}
+        onRerunStage2Model={handleRerunStage2Model}
+        onRerunStage3={handleRerunStage3}
+        onSetMode={setExecutionMode}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        editingPrompt={isEditingPrompt}
+        editPromptText={editPromptText}
+        onEditChange={setEditPromptText}
+        onEditSave={saveEditedPrompt}
+        onEditCancel={cancelEditPrompt}
+        rerunStage1ModelLoading={rerunStage1ModelLoading}
+        rerunStage2ModelLoading={rerunStage2ModelLoading}
+        rerunStage3Loading={rerunStage3Loading}
       />
+      
     </div>
   );
 }
