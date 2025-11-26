@@ -16,6 +16,7 @@ function deAnonymizeText(text, labelToModel) {
 
 export default function Stage2({ rankings, labelToModel, aggregateRankings, onRerun, disabled = false, loadingModel = null }) {
   const [activeTab, setActiveTab] = useState(0);
+  const [showInfo, setShowInfo] = useState(false);
 
   if (!rankings || rankings.length === 0) {
     return null;
@@ -90,9 +91,32 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, onRe
 
       {aggregateRankings && aggregateRankings.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
+          <h4>
+            Aggregate Rankings (Street Cred)
+            <span
+              className="icon-button"
+              style={{ marginLeft: 8 }}
+              aria-label="Ranking methodology information"
+              title="Avg Rank is the average position across peer rankings (ordinal). Lower position is better. Values are rounded to whole numbers."
+              role="button"
+              tabIndex={0}
+              aria-expanded={showInfo}
+              aria-controls="ranking-methodology"
+              onClick={() => setShowInfo((v) => !v)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowInfo((v) => !v); } }}
+            >
+              ℹ️
+            </span>
+          </h4>
+          {showInfo && (
+            <div id="ranking-methodology" className="stage-loading" role="region" aria-label="Ranking methodology details">
+              <span>
+                Avg Rank is the average position across peer evaluations. Positions are ordinal (1st, 2nd, …), lower is better, and values are rounded to whole numbers. "Votes" indicates how many evaluations contributed.
+              </span>
+            </div>
+          )}
           <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
+            Combined results across all peer evaluations (lower position is better). Avg Rank represents the average position across rankings and is rounded to whole numbers.
           </p>
           <div className="aggregate-list">
             {aggregateRankings.map((agg, index) => (
@@ -101,8 +125,8 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings, onRe
                 <span className="rank-model">
                   {agg.model.split('/')[1] || agg.model}
                 </span>
-                <span className="rank-score">
-                  Avg: {agg.average_rank.toFixed(2)}
+                <span className="rank-score" title="Average ranking position across all evaluations">
+                  Avg Rank: {Math.round(agg.average_rank)}
                 </span>
                 <span className="rank-count">
                   ({agg.rankings_count} votes)

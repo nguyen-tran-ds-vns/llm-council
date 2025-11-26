@@ -207,6 +207,19 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                     None,
                 )
 
+                # Persist paused state so UI can show Continue across sessions
+                try:
+                    conv = storage.get_conversation(conversation_id)
+                    if conv and isinstance(conv.get("messages"), list) and len(conv["messages"]) > 0:
+                        last_index = len(conv["messages"]) - 1
+                        storage.update_message(conversation_id, last_index, {
+                            "paused": True,
+                            "pausedStage": "stage1",
+                        })
+                except Exception:
+                    # Non-fatal; continue streaming paused event
+                    pass
+
                 # Emit paused event and stop stream
                 yield f"data: {json.dumps({'type': 'paused', 'stage': 'stage1'})}\n\n"
                 return
@@ -284,7 +297,9 @@ async def continue_to_next_stage(conversation_id: str, message_index: int):
             "metadata": {
                 "label_to_model": label_to_model,
                 "aggregate_rankings": aggregate_rankings,
-            }
+            },
+            "paused": True,
+            "pausedStage": "stage2",
         })
         return {
             "stage": "stage2",
@@ -299,7 +314,9 @@ async def continue_to_next_stage(conversation_id: str, message_index: int):
         # Run Stage 3
         stage3_result = await stage3_synthesize_final(user_query, msg["stage1"], msg["stage2"])
         storage.update_message(conversation_id, message_index, {
-            "stage3": stage3_result
+            "stage3": stage3_result,
+            "paused": False,
+            "pausedStage": None,
         })
         return {
             "stage": "stage3",

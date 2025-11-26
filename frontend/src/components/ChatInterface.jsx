@@ -10,7 +10,6 @@ export default function ChatInterface({
   onSendMessage,
   isLoading,
   executionMode,
-  onContinue,
   onEditUserMessage,
   onRerunStage1Model,
   onRerunStage2Model,
@@ -26,9 +25,13 @@ export default function ChatInterface({
   rerunStage1ModelLoading,
   rerunStage2ModelLoading,
   rerunStage3Loading,
+  resetting = false,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
+  const [downloadLoading, setDownloadLoading] = useState({ json: false, yaml: false, md: false });
+  const [downloadError, setDownloadError] = useState(null);
+  const [downloadStatus, setDownloadStatus] = useState('');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,6 +57,129 @@ export default function ChatInterface({
     }
   };
 
+  const buildPayload = (assistantMsg, userMsg) => {
+    const stage1 = Array.isArray(assistantMsg?.stage1) ? assistantMsg.stage1.map((r) => ({ model: r.model, response: r.response })) : [];
+    const stage2 = Array.isArray(assistantMsg?.stage2) ? assistantMsg.stage2.map((r) => ({ model: r.model, ranking: r.ranking, parsed_ranking: r.parsed_ranking })) : [];
+    const stage3 = assistantMsg?.stage3 ? { model: assistantMsg.stage3.model, response: assistantMsg.stage3.response } : null;
+    return {
+      conversation_id: conversation.id,
+      title: conversation.title,
+      created_at: conversation.created_at,
+      prompt: userMsg?.content || '',
+      stage1,
+      stage2,
+      metadata: assistantMsg?.metadata || null,
+      stage3,
+    };
+  };
+
+  const toYAML = (value, indent = 0) => {
+    const sp = '  '.repeat(indent);
+    if (value === null || value === undefined) return 'null';
+    if (typeof value === 'string') {
+      const safe = value.includes('\n') || value.includes(':') ? JSON.stringify(value) : value;
+      return safe;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      return value.map((v) => `${sp}- ${toYAML(v, indent + 1).replace(/^\s+/, '')}`).join('\n');
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value)
+        .map(([k, v]) => {
+          const child = toYAML(v, indent + 1);
+          const needsBlock = typeof v === 'object' && v !== null;
+          return `${sp}${k}: ${needsBlock && !String(child).startsWith('- ') && !String(child).startsWith('{') ? '\n' + child : child}`;
+        })
+        .join('\n');
+    }
+    return String(value);
+  };
+
+  const toMarkdown = (payload) => {
+    const lines = [];
+    lines.push(`# LLM Council Results`);
+    lines.push('');
+    lines.push(`**Conversation**: ${payload.title} (${payload.conversation_id})`);
+    lines.push(`**Created**: ${payload.created_at}`);
+    lines.push('');
+    lines.push('## Prompt');
+    lines.push('');
+    lines.push(payload.prompt || '');
+    lines.push('');
+    if (payload.stage1?.length) {
+      lines.push('## Stage 1: Individual Responses');
+      payload.stage1.forEach((r) => {
+        lines.push('');
+        lines.push(`### ${r.model}`);
+        lines.push(r.response || '');
+      });
+      lines.push('');
+    }
+    if (payload.stage2?.length) {
+      lines.push('## Stage 2: Peer Rankings');
+      payload.stage2.forEach((r) => {
+        lines.push('');
+        lines.push(`### ${r.model}`);
+        lines.push(r.ranking || '');
+      });
+      lines.push('');
+    }
+    if (payload.stage3) {
+      lines.push('## Stage 3: Final Council Answer');
+      lines.push('');
+      lines.push(`### ${payload.stage3.model}`);
+      lines.push(payload.stage3.response || '');
+      lines.push('');
+    }
+    return lines.join('\n');
+  };
+
+  const triggerDownload = (content, mime, filename) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownload = async (format, assistantMsg, userMsg) => {
+    setDownloadLoading((prev) => ({ ...prev, [format]: true }));
+    setDownloadError(null);
+    try {
+      await Promise.resolve();
+      const payload = buildPayload(assistantMsg, userMsg);
+      let content = '';
+      let mime = '';
+      let ext = '';
+      if (format === 'json') {
+        content = JSON.stringify(payload, null, 2);
+        mime = 'application/json';
+        ext = 'json';
+      } else if (format === 'yaml') {
+        content = `---\n${toYAML(payload)}`;
+        mime = 'text/yaml';
+        ext = 'yaml';
+      } else {
+        content = toMarkdown(payload);
+        mime = 'text/markdown';
+        ext = 'md';
+      }
+      const filename = `council_${conversation.id}.${ext}`;
+      triggerDownload(content, mime, filename);
+      setDownloadStatus(`Downloaded ${ext.toUpperCase()} file`);
+    } catch (e) {
+      setDownloadError('Failed to generate download');
+      console.error(e);
+    } finally {
+      setDownloadLoading((prev) => ({ ...prev, [format]: false }));
+    }
+  };
+
   if (!conversation) {
     return (
       <div className="chat-interface">
@@ -66,7 +192,7 @@ export default function ChatInterface({
   }
 
   return (
-    <div className="chat-interface">
+    <div className={`chat-interface ${resetting ? 'resetting' : ''}`}>
       <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
         <div>
           <label style={{ marginRight: 8 }}>Execution Mode:</label>
@@ -190,13 +316,56 @@ export default function ChatInterface({
                       loading={rerunStage3Loading}
                     />
                   )}
-
-                  {msg.paused && (
-                    <div className="stage-loading" style={{ marginTop: 12 }}>
-                      <span>Execution paused after {msg.pausedStage}. Continue to next stage?</span>
-                      <button className="icon-button" style={{ marginLeft: 8 }} onClick={onContinue} disabled={isLoading}>Continue</button>
-                    </div>
-                  )}
+                  {(() => {
+                    const isLastAssistant = index === conversation.messages.length - 1 && msg.role === 'assistant';
+                    if (!isLastAssistant || !msg.stage3) return null;
+                    const userMsg = conversation.messages[index - 1];
+                    return (
+                      <div className="stage-loading" style={{ marginTop: 12, fontStyle: 'normal', flexWrap: 'wrap' }} role="status" aria-live="polite">
+                        <span style={{ fontWeight: 600, color: 'var(--color-success)' }}>Process Completed</span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
+                          <button
+                            className="btn"
+                            onClick={() => handleDownload('json', msg, userMsg)}
+                            disabled={downloadLoading.json}
+                            aria-label="Download results as JSON"
+                            aria-busy={downloadLoading.json}
+                            title="Download JSON"
+                          >
+                            <span aria-hidden="true">{`{}`}</span>
+                            {downloadLoading.json ? 'Preparing…' : 'JSON'}
+                            {downloadLoading.json && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => handleDownload('yaml', msg, userMsg)}
+                            disabled={downloadLoading.yaml}
+                            aria-label="Download results as YAML"
+                            aria-busy={downloadLoading.yaml}
+                            title="Download YAML"
+                          >
+                            <span aria-hidden="true">📄</span>
+                            {downloadLoading.yaml ? 'Preparing…' : 'YAML'}
+                            {downloadLoading.yaml && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() => handleDownload('md', msg, userMsg)}
+                            disabled={downloadLoading.md}
+                            aria-label="Download results as Markdown"
+                            aria-busy={downloadLoading.md}
+                            title="Download Markdown"
+                          >
+                            <span aria-hidden="true">#</span>
+                            {downloadLoading.md ? 'Preparing…' : 'Markdown'}
+                            {downloadLoading.md && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                          </button>
+                        </div>
+                        {downloadStatus && <span style={{ marginLeft: 8 }}>{downloadStatus}</span>}
+                        {downloadError && <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>{downloadError}</span>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

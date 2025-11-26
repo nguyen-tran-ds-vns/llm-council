@@ -16,6 +16,7 @@ function App() {
   const [rerunStage1ModelLoading, setRerunStage1ModelLoading] = useState(null);
   const [rerunStage2ModelLoading, setRerunStage2ModelLoading] = useState(null);
   const [rerunStage3Loading, setRerunStage3Loading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
     try {
@@ -243,28 +244,7 @@ function App() {
     }
   };
 
-  const handleContinue = async () => {
-    if (!currentConversationId || !currentConversation) return;
-    const msgIndex = currentConversation.messages.length - 1;
-    try {
-      const res = await api.continueStage(currentConversationId, msgIndex);
-      setCurrentConversation((prev) => {
-        const messages = [...prev.messages];
-        const lastMsg = messages[messages.length - 1];
-        if (res.stage === 'stage2') {
-          lastMsg.stage2 = res.data;
-          lastMsg.metadata = res.metadata;
-        } else if (res.stage === 'stage3') {
-          lastMsg.stage3 = res.data;
-        }
-        lastMsg.paused = res.stage !== 'complete';
-        lastMsg.pausedStage = res.stage;
-        return { ...prev, messages };
-      });
-    } catch (error) {
-      console.error('Failed to continue:', error);
-    }
-  };
+  
 
   const startEditPrompt = () => {
     if (!currentConversation) return;
@@ -276,29 +256,32 @@ function App() {
   };
 
   const saveEditedPrompt = async (newText) => {
-    if (!currentConversationId || !currentConversation) return;
-    const msgIndex = currentConversation.messages.length - 1; // assistant message index
-    const userIndex = msgIndex - 1;
     try {
-      setIsLoading(true);
-      const res = await api.rerunFull(currentConversationId, msgIndex, newText);
-      setCurrentConversation((prev) => {
-        const messages = [...prev.messages];
-        messages[userIndex] = { ...messages[userIndex], content: newText };
-        const lastMsg = messages[messages.length - 1];
-        lastMsg.stage1 = res.stage1;
-        lastMsg.stage2 = res.stage2;
-        lastMsg.stage3 = res.stage3;
-        lastMsg.metadata = res.metadata;
-        lastMsg.paused = false;
-        lastMsg.pausedStage = undefined;
-        return { ...prev, messages };
-      });
-    } catch (error) {
-      console.error('Failed to rerun with edited prompt:', error);
-    } finally {
-      setIsLoading(false);
+      setIsResetting(true);
       setIsEditingPrompt(false);
+      await new Promise((r) => setTimeout(r, 200));
+
+      // Reset to initial conditions
+      setCurrentConversationId(null);
+      setCurrentConversation(null);
+      setIsLoading(false);
+      setRerunStage1ModelLoading(null);
+      setRerunStage2ModelLoading(null);
+      setRerunStage3Loading(false);
+
+      // Create a fresh conversation
+      const newConv = await api.createConversation();
+      setConversations((prev) => [{ id: newConv.id, created_at: newConv.created_at, message_count: 0 }, ...prev]);
+      setCurrentConversationId(newConv.id);
+      setCurrentConversation(newConv);
+
+      // Allow state to settle then start from the beginning with the edited prompt
+      await new Promise((r) => setTimeout(r, 50));
+      await handleSendMessage(newText);
+    } catch (error) {
+      console.error('Restart failed:', error);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -378,7 +361,6 @@ function App() {
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
         executionMode={executionMode}
-        onContinue={handleContinue}
         onEditUserMessage={startEditPrompt}
         onRerunStage1Model={handleRerunStage1Model}
         onRerunStage2Model={handleRerunStage2Model}
@@ -394,6 +376,7 @@ function App() {
         rerunStage1ModelLoading={rerunStage1ModelLoading}
         rerunStage2ModelLoading={rerunStage2ModelLoading}
         rerunStage3Loading={rerunStage3Loading}
+        resetting={isResetting}
       />
       
     </div>

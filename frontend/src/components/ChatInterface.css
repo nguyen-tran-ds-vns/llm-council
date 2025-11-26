@@ -4,6 +4,7 @@
   flex-direction: column;
   height: 100vh;
   background: var(--color-bg);
+  transition: opacity var(--transition-medium) var(--easing-standard);
 }
 
 .messages-container {
@@ -159,4 +160,7 @@
   cursor: not-allowed;
   background: #ccc;
   border-color: #ccc;
+}
+.chat-interface.resetting {
+  opacity: 0;
 }
