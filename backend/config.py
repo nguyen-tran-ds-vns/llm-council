@@ -14,11 +14,9 @@ COUNCIL_MODELS = [
     # "google/gemini-3-pro-preview",
     # "anthropic/claude-sonnet-4.5",
     # "x-ai/grok-4",
-    "allenai/olmo-3-32b-think",
-    "x-ai/glm-4.6",
     "google/gemini-2.5-flash",
     "x-ai/grok-4.1-fast",
-    "moonshotai/kimi-k2-thinking"
+    ""
 ]
 
 # Chairman model - synthesizes final response

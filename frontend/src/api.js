@@ -68,6 +68,27 @@ export const api = {
     return response.json();
   },
 
+  async getModels() {
+    const response = await fetch(`${API_BASE}/api/models`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch models');
+    }
+    return response.json();
+  },
+
+  async updateConversationConfig(conversationId, payload) {
+    const response = await fetch(`${API_BASE}/api/conversations/${conversationId}/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || 'Failed to update config');
+    }
+    return response.json();
+  },
+
   /**
    * Send a message in a conversation.
    */

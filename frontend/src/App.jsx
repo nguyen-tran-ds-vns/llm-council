@@ -9,7 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [executionMode, setExecutionMode] = useState('auto');
+  const [executionMode, setExecutionMode] = useState('step');
   const [theme, setTheme] = useState('light');
   const [isEditingPrompt, setIsEditingPrompt] = useState(false);
   const [editPromptText, setEditPromptText] = useState('');
@@ -29,6 +29,14 @@ function App() {
     }
   }, []);
 
+  useEffect(() => {
+    try {
+      const storedMode = localStorage.getItem('executionMode');
+      const initialMode = storedMode === 'auto' || storedMode === 'step' ? storedMode : 'step';
+      setExecutionMode(initialMode);
+    } catch (_err) { void _err; }
+  }, []);
+
   const handleToggleTheme = () => {
     try {
       const next = theme === 'dark' ? 'light' : 'dark';
@@ -39,6 +47,12 @@ function App() {
       console.error('Failed to toggle theme:', err);
     }
   };
+
+  useEffect(() => {
+    try {
+      if (executionMode) localStorage.setItem('executionMode', executionMode);
+    } catch (_err) { void _err; }
+  }, [executionMode]);
 
   const loadConversations = async () => {
     try {
@@ -377,6 +391,7 @@ function App() {
         rerunStage2ModelLoading={rerunStage2ModelLoading}
         rerunStage3Loading={rerunStage3Loading}
         resetting={isResetting}
+        onRefreshConversation={() => currentConversationId && loadConversation(currentConversationId)}
       />
       
     </div>

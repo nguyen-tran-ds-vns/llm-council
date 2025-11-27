@@ -11,6 +11,7 @@ import asyncio
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, run_stage1_for_model, run_stage2_for_model
+from .openrouter import fetch_available_models
 
 app = FastAPI(title="LLM Council API")
 
@@ -59,6 +60,8 @@ class Conversation(BaseModel):
     created_at: str
     title: str
     messages: List[Dict[str, Any]]
+    council_models: List[str] | None = None
+    chairman_model: str | None = None
 
 
 class RerunRequest(BaseModel):
@@ -66,10 +69,21 @@ class RerunRequest(BaseModel):
     content: str | None = None
 
 
+class UpdateConfigRequest(BaseModel):
+    council_models: List[str] | None = None
+    chairman_model: str | None = None
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.get("/api/models")
+async def list_models():
+    models, from_cache = await fetch_available_models()
+    return {"models": models, "cached": from_cache}
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -110,6 +124,48 @@ async def update_conversation_title_endpoint(conversation_id: str, request: Upda
     storage.update_conversation_title(conversation_id, title)
     return {"ok": True, "title": title}
 
+
+@app.patch("/api/conversations/{conversation_id}/config")
+async def update_conversation_config_endpoint(conversation_id: str, request: UpdateConfigRequest):
+    conversation = storage.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    models_payload, _ = await fetch_available_models()
+    available_ids = {m.get("id") for m in models_payload}
+    updates: Dict[str, Any] = {}
+    if request.council_models is not None:
+        cleaned = []
+        seen = set()
+        for mid in request.council_models:
+            if not isinstance(mid, str):
+                continue
+            m = mid.strip()
+            if not m or m in seen:
+                continue
+            seen.add(m)
+            cleaned.append(m)
+
+        # Identify unknowns and only error for newly added unknowns
+        current = conversation.get("council_models") or []
+        current_clean = [str(x).strip() for x in current if isinstance(x, str) and str(x).strip()]
+        current_set = set(current_clean)
+        unknown = [m for m in cleaned if m not in available_ids]
+        newly_added_unknown = [m for m in unknown if m not in current_set]
+        if newly_added_unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown model: {newly_added_unknown[0]}")
+
+        # Drop any unknowns that were lingering from old config
+        cleaned = [m for m in cleaned if m in available_ids]
+        updates["council_models"] = cleaned
+    if request.chairman_model is not None:
+        cm = request.chairman_model.strip()
+        if cm and cm not in available_ids:
+            raise HTTPException(status_code=400, detail="Unknown chairman model")
+        updates["chairman_model"] = cm
+    storage.update_conversation_config(conversation_id, updates)
+    updated = storage.get_conversation(conversation_id)
+    return {"ok": True, "config": {"council_models": updated.get("council_models"), "chairman_model": updated.get("chairman_model")}}
+
 @app.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     deleted = storage.delete_conversation(conversation_id)
@@ -142,7 +198,9 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content,
+        conversation.get("council_models"),
+        conversation.get("chairman_model"),
     )
 
     # Add assistant message with all stages
@@ -188,7 +246,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+            stage1_results = await stage1_collect_responses(request.content, conversation.get("council_models"))
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # If step mode, persist partial result and pause
@@ -226,13 +284,13 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, conversation.get("council_models"))
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, conversation.get("chairman_model"))
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
@@ -312,7 +370,7 @@ async def continue_to_next_stage(conversation_id: str, message_index: int):
 
     if msg.get("stage2") is not None and msg.get("stage3") is None:
         # Run Stage 3
-        stage3_result = await stage3_synthesize_final(user_query, msg["stage1"], msg["stage2"])
+        stage3_result = await stage3_synthesize_final(user_query, msg["stage1"], msg["stage2"], conversation.get("chairman_model"))
         storage.update_message(conversation_id, message_index, {
             "stage3": stage3_result,
             "paused": False,
@@ -355,7 +413,7 @@ async def rerun_full(conversation_id: str, message_index: int, request: RerunReq
         storage.update_message(conversation_id, message_index - 1, {"content": request.content})
 
     # Run full council
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(user_query)
+    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(user_query, conversation.get("council_models"), conversation.get("chairman_model"))
 
     # Update assistant message
     storage.update_message(conversation_id, message_index, {

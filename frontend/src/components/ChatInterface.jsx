@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
+import ConversationConfigPanel from './ConversationConfigPanel';
 import './ChatInterface.css';
 
 export default function ChatInterface({
@@ -26,12 +27,15 @@ export default function ChatInterface({
   rerunStage2ModelLoading,
   rerunStage3Loading,
   resetting = false,
+  onRefreshConversation,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
   const [downloadLoading, setDownloadLoading] = useState({ json: false, yaml: false, md: false });
   const [downloadError, setDownloadError] = useState(null);
   const [downloadStatus, setDownloadStatus] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [activeTab, setActiveTab] = useState('chat');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -40,6 +44,26 @@ export default function ChatInterface({
   useEffect(() => {
     scrollToBottom();
   }, [conversation]);
+
+  useEffect(() => {
+    const cid = conversation?.id;
+    if (!cid) return;
+    try {
+      const key = `tab:${cid}`;
+      const stored = localStorage.getItem(key);
+      const initial = stored === 'config' ? 'config' : 'chat';
+      setActiveTab(initial);
+    } catch (_err) { void _err; }
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    const cid = conversation?.id;
+    if (!cid) return;
+    try {
+      const key = `tab:${cid}`;
+      localStorage.setItem(key, activeTab);
+    } catch (_err) { void _err; }
+  }, [activeTab, conversation?.id]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -193,38 +217,73 @@ export default function ChatInterface({
 
   return (
     <div className={`chat-interface ${resetting ? 'resetting' : ''}`}>
-      <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
-        <div>
-          <label style={{ marginRight: 8 }}>Execution Mode:</label>
-          <select value={executionMode} onChange={(e) => onSetMode?.(e.target.value)}>
-            <option value="auto">Auto</option>
-            <option value="step">Step-by-step</option>
-          </select>
-        </div>
-        <div className="toggle" aria-label="Theme toggle" style={{ alignItems: 'center' }}>
-          <span style={{ fontSize: 'var(--font-size-sm)', marginRight: 8 }}>Theme:</span>
-          <button
-            type="button"
-            className="toggle-switch"
-            role="switch"
-            aria-checked={theme === 'dark'}
-            aria-label="Toggle dark mode"
-            onClick={onToggleTheme}
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            <span className="thumb" aria-hidden="true" />
-          </button>
-          <span style={{ fontSize: 'var(--font-size-sm)', marginLeft: 8 }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
-        </div>
+      <div className="tabs" role="tablist" aria-label="Conversation sections">
+        <button
+          id={`tab-chat-${conversation.id}`}
+          className={`tab ${activeTab === 'chat' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          aria-controls={`panel-chat-${conversation.id}`}
+          onClick={() => setActiveTab('chat')}
+        >
+          Chat
+        </button>
+        <button
+          id={`tab-config-${conversation.id}`}
+          className={`tab ${activeTab === 'config' ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === 'config'}
+          aria-controls={`panel-config-${conversation.id}`}
+          onClick={() => setActiveTab('config')}
+        >
+          Configuration
+        </button>
       </div>
-      <div className="messages-container">
-        {conversation.messages.length === 0 ? (
-          <div className="empty-state">
-            <h2>Start a conversation</h2>
-            <p>Ask a question to consult the LLM Council</p>
+
+      {activeTab === 'config' && (
+        <div id={`panel-config-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-config-${conversation.id}`} className="tab-panel">
+          <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
+            <div>
+              <label style={{ marginRight: 8 }}>Execution Mode:</label>
+              <select value={executionMode} onChange={(e) => onSetMode?.(e.target.value)}>
+                <option value="auto">Auto</option>
+                <option value="step">Step-by-step</option>
+              </select>
+            </div>
+            <div className="toggle" aria-label="Theme toggle" style={{ alignItems: 'center' }}>
+              <span style={{ fontSize: 'var(--font-size-sm)', marginRight: 8 }}>Theme:</span>
+              <button
+                type="button"
+                className="toggle-switch"
+                role="switch"
+                aria-checked={theme === 'dark'}
+                aria-label="Toggle dark mode"
+                onClick={onToggleTheme}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                <span className="thumb" aria-hidden="true" />
+              </button>
+              <span style={{ fontSize: 'var(--font-size-sm)', marginLeft: 8 }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+            </div>
           </div>
-        ) : (
-          conversation.messages.map((msg, index) => (
+          <ConversationConfigPanel
+            conversation={conversation}
+            onUpdated={onRefreshConversation}
+            onSavingChange={setSavingConfig}
+          />
+        </div>
+      )}
+
+      {activeTab === 'chat' && (
+        <div id={`panel-chat-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-chat-${conversation.id}`} className="tab-panel">
+          <div className="messages-container">
+          {conversation.messages.length === 0 ? (
+            <div className="empty-state">
+              <h2>Start a conversation</h2>
+              <p>Ask a question to consult the LLM Council</p>
+            </div>
+          ) : (
+            conversation.messages.map((msg, index) => (
             <div key={index} className="message-group">
               {msg.role === 'user' ? (
                 <div className="user-message">
@@ -380,27 +439,29 @@ export default function ChatInterface({
         )}
 
         <div ref={messagesEndRef} />
-      </div>
+          </div>
 
-      {conversation.messages.length === 0 && (
-        <form className="input-form" onSubmit={handleSubmit}>
-          <textarea
-            className="message-input"
-            placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isLoading}
-            rows={3}
-          />
-          <button
-            type="submit"
-            className="send-button"
-            disabled={!input.trim() || isLoading}
-          >
-            Send
-          </button>
-        </form>
+          {conversation.messages.length === 0 && (
+            <form className="input-form" onSubmit={handleSubmit}>
+              <textarea
+                className="message-input"
+                placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || savingConfig}
+                rows={3}
+              />
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!input.trim() || isLoading || savingConfig}
+              >
+                Send
+              </button>
+            </form>
+          )}
+        </div>
       )}
     </div>
   );

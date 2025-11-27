@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from .config import DATA_DIR
+from .config import DATA_DIR, COUNCIL_MODELS, CHAIRMAN_MODEL
 
 
 def ensure_data_dir():
@@ -34,7 +34,9 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "id": conversation_id,
         "created_at": datetime.utcnow().isoformat(),
         "title": "New Conversation",
-        "messages": []
+        "messages": [],
+        "council_models": COUNCIL_MODELS,
+        "chairman_model": CHAIRMAN_MODEL,
     }
 
     # Save to file
@@ -61,7 +63,12 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     with open(path, 'r') as f:
-        return json.load(f)
+        data = json.load(f)
+        if "council_models" not in data:
+            data["council_models"] = COUNCIL_MODELS
+        if "chairman_model" not in data:
+            data["chairman_model"] = CHAIRMAN_MODEL
+        return data
 
 
 def save_conversation(conversation: Dict[str, Any]):
@@ -242,3 +249,14 @@ def delete_conversation(conversation_id: str) -> bool:
         return False
     os.remove(path)
     return True
+
+
+def update_conversation_config(conversation_id: str, updates: Dict[str, Any]):
+    conversation = get_conversation(conversation_id)
+    if conversation is None:
+        raise ValueError(f"Conversation {conversation_id} not found")
+    if "council_models" in updates and isinstance(updates["council_models"], list):
+        conversation["council_models"] = updates["council_models"]
+    if "chairman_model" in updates and isinstance(updates["chairman_model"], str):
+        conversation["chairman_model"] = updates["chairman_model"]
+    save_conversation(conversation)

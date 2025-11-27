@@ -7,6 +7,41 @@
   transition: opacity var(--transition-medium) var(--easing-standard);
 }
 
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.tab:hover {
+  background: var(--color-bg);
+}
+
+.tab.active {
+  background: color-mix(in oklab, var(--color-primary) 12%, var(--color-bg));
+  border: 1px solid var(--color-primary);
+  border-bottom-color: transparent;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .messages-container {
   flex: 1;
   overflow-y: auto;
