@@ -28,6 +28,8 @@ export default function ChatInterface({
   rerunStage3Loading,
   resetting = false,
   onRefreshConversation,
+  onContinueNextStage,
+  continuing = false,
 }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
@@ -44,26 +46,6 @@ export default function ChatInterface({
   useEffect(() => {
     scrollToBottom();
   }, [conversation]);
-
-  useEffect(() => {
-    const cid = conversation?.id;
-    if (!cid) return;
-    try {
-      const key = `tab:${cid}`;
-      const stored = localStorage.getItem(key);
-      const initial = stored === 'config' ? 'config' : 'chat';
-      setActiveTab(initial);
-    } catch (_err) { void _err; }
-  }, [conversation?.id]);
-
-  useEffect(() => {
-    const cid = conversation?.id;
-    if (!cid) return;
-    try {
-      const key = `tab:${cid}`;
-      localStorage.setItem(key, activeTab);
-    } catch (_err) { void _err; }
-  }, [activeTab, conversation?.id]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -217,228 +199,257 @@ export default function ChatInterface({
 
   return (
     <div className={`chat-interface ${resetting ? 'resetting' : ''}`}>
-      <div className="tabs" role="tablist" aria-label="Conversation sections">
+      <div className="tabbar" role="tablist" aria-label="Views">
         <button
-          id={`tab-chat-${conversation.id}`}
           className={`tab ${activeTab === 'chat' ? 'active' : ''}`}
           role="tab"
           aria-selected={activeTab === 'chat'}
-          aria-controls={`panel-chat-${conversation.id}`}
+          aria-controls={`tab-panel-chat-${conversation.id}`}
+          id={`tab-chat-${conversation.id}`}
           onClick={() => setActiveTab('chat')}
-        >
-          Chat
-        </button>
+          onKeyDown={(e) => { if (e.key === 'ArrowRight') setActiveTab('config'); }}
+          title="Main Chat"
+        >Chat</button>
         <button
-          id={`tab-config-${conversation.id}`}
           className={`tab ${activeTab === 'config' ? 'active' : ''}`}
           role="tab"
           aria-selected={activeTab === 'config'}
-          aria-controls={`panel-config-${conversation.id}`}
+          aria-controls={`tab-panel-config-${conversation.id}`}
+          id={`tab-config-${conversation.id}`}
           onClick={() => setActiveTab('config')}
-        >
-          Configuration
-        </button>
+          onKeyDown={(e) => { if (e.key === 'ArrowLeft') setActiveTab('chat'); }}
+          title="Configuration"
+        >Configuration</button>
+        <div className="tabbar-spacer" />
+        <div className="toggle" aria-label="Theme toggle" style={{ alignItems: 'center' }}>
+          <span style={{ fontSize: 'var(--font-size-sm)', marginRight: 8 }}>Theme:</span>
+          <button
+            type="button"
+            className="toggle-switch"
+            role="switch"
+            aria-checked={theme === 'dark'}
+            aria-label="Toggle dark mode"
+            onClick={onToggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <span className="thumb" aria-hidden="true" />
+          </button>
+          <span style={{ fontSize: 'var(--font-size-sm)', marginLeft: 8 }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+        </div>
       </div>
 
       {activeTab === 'config' && (
-        <div id={`panel-config-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-config-${conversation.id}`} className="tab-panel">
-          <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
-            <div>
-              <label style={{ marginRight: 8 }}>Execution Mode:</label>
-              <select value={executionMode} onChange={(e) => onSetMode?.(e.target.value)}>
-                <option value="auto">Auto</option>
+        <div id={`tab-panel-config-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-config-${conversation.id}`} className="tab-panel">
+          <div className="config-group">
+            <div className="group-header">General Settings</div>
+            <div className="group-body" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 'var(--space-3)' }}>
+              <label htmlFor={`exec-mode-${conversation.id}`} style={{ fontWeight: 600 }}>Execution Mode</label>
+              <select id={`exec-mode-${conversation.id}`} value={executionMode} onChange={(e) => onSetMode?.(e.target.value)} className="select">
                 <option value="step">Step-by-step</option>
+                <option value="auto">Auto</option>
               </select>
             </div>
-            <div className="toggle" aria-label="Theme toggle" style={{ alignItems: 'center' }}>
-              <span style={{ fontSize: 'var(--font-size-sm)', marginRight: 8 }}>Theme:</span>
-              <button
-                type="button"
-                className="toggle-switch"
-                role="switch"
-                aria-checked={theme === 'dark'}
-                aria-label="Toggle dark mode"
-                onClick={onToggleTheme}
-                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              >
-                <span className="thumb" aria-hidden="true" />
-              </button>
-              <span style={{ fontSize: 'var(--font-size-sm)', marginLeft: 8 }}>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+          </div>
+          <div className="config-group">
+            <div className="group-header">Model Settings</div>
+            <div className="group-body">
+              <ConversationConfigPanel
+                conversation={conversation}
+                onUpdated={onRefreshConversation}
+                onSavingChange={setSavingConfig}
+                embedded={true}
+              />
             </div>
           </div>
-          <ConversationConfigPanel
-            conversation={conversation}
-            onUpdated={onRefreshConversation}
-            onSavingChange={setSavingConfig}
-          />
         </div>
       )}
 
       {activeTab === 'chat' && (
-        <div id={`panel-chat-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-chat-${conversation.id}`} className="tab-panel">
+        <div id={`tab-panel-chat-${conversation.id}`} role="tabpanel" aria-labelledby={`tab-chat-${conversation.id}`} className="tab-panel">
           <div className="messages-container">
-          {conversation.messages.length === 0 ? (
-            <div className="empty-state">
-              <h2>Start a conversation</h2>
-              <p>Ask a question to consult the LLM Council</p>
-            </div>
-          ) : (
-            conversation.messages.map((msg, index) => (
-            <div key={index} className="message-group">
-              {msg.role === 'user' ? (
-                <div className="user-message">
-                  <div className="message-label">You</div>
-                  <div className="message-content">
-                    {editingPrompt && index === conversation.messages.length - 2 ? (
-                      <div className="prompt-edit">
-                        <textarea
-                          className="input"
-                          value={editPromptText}
-                          onChange={(e) => onEditChange?.(e.target.value)}
-                          disabled={isLoading}
-                          rows={4}
-                          style={{ width: '100%', minHeight: 80 }}
-                          aria-label="Edit prompt"
-                          onKeyDown={(e) => {
-                            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onEditSave?.(editPromptText)
-                          }}
-                        />
-                        <div className="dialog-actions" style={{ marginTop: 8 }}>
-                          <button className="btn primary" onClick={() => onEditSave?.(editPromptText)} disabled={isLoading}>Save and Rerun</button>
-                          <button className="btn" onClick={onEditCancel} disabled={isLoading}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="markdown-content">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
-                        {index === conversation.messages.length - 2 && (
-                          <div style={{ marginTop: 8 }}>
-                            <button className="icon-button" onClick={onEditUserMessage} disabled={isLoading} aria-label="Edit prompt" title="Edit prompt">Edit</button>
+            {conversation.messages.length === 0 ? (
+              <div className="empty-state">
+                <h2>Start a conversation</h2>
+                <p>Ask a question to consult the LLM Council</p>
+              </div>
+            ) : (
+              conversation.messages.map((msg, index) => (
+                <div key={index} className="message-group">
+                  {msg.role === 'user' ? (
+                    <div className="user-message">
+                      <div className="message-label">You</div>
+                      <div className="message-content">
+                        {editingPrompt && index === conversation.messages.length - 2 ? (
+                          <div className="prompt-edit">
+                            <textarea
+                              className="input"
+                              value={editPromptText}
+                              onChange={(e) => onEditChange?.(e.target.value)}
+                              disabled={isLoading}
+                              rows={4}
+                              style={{ width: '100%', minHeight: 80 }}
+                              aria-label="Edit prompt"
+                              onKeyDown={(e) => {
+                                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onEditSave?.(editPromptText)
+                              }}
+                            />
+                            <div className="dialog-actions" style={{ marginTop: 8 }}>
+                              <button className="btn primary" onClick={() => onEditSave?.(editPromptText)} disabled={isLoading}>Save and Rerun</button>
+                              <button className="btn" onClick={onEditCancel} disabled={isLoading}>Cancel</button>
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <div className="markdown-content">
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
+                            {index === conversation.messages.length - 2 && (
+                              <div style={{ marginTop: 8 }}>
+                                <button className="icon-button" onClick={onEditUserMessage} disabled={isLoading} aria-label="Edit prompt" title="Edit prompt">Edit</button>
+                              </div>
+                            )}
+                          </>
                         )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="assistant-message">
-                  <div className="message-label">LLM Council</div>
-
-                  {/* Stage 1 */}
-                  {msg.loading?.stage1 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 1: Collecting individual responses...</span>
-                    </div>
-                  )}
-                  {msg.stage1 && (
-                    <Stage1
-                      responses={msg.stage1}
-                      onRerun={(model) => onRerunStage1Model?.(model)}
-                      disabled={isLoading}
-                      loadingModel={rerunStage1ModelLoading}
-                    />
-                  )}
-
-                  {/* Stage 2 */}
-                  {msg.loading?.stage2 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 2: Peer rankings...</span>
-                    </div>
-                  )}
-                  {msg.stage2 && (
-                    <Stage2
-                      rankings={msg.stage2}
-                      labelToModel={msg.metadata?.label_to_model}
-                      aggregateRankings={msg.metadata?.aggregate_rankings}
-                      onRerun={(model) => onRerunStage2Model?.(model)}
-                      disabled={isLoading}
-                      loadingModel={rerunStage2ModelLoading}
-                    />
-                  )}
-
-                  {/* Stage 3 */}
-                  {msg.loading?.stage3 && (
-                    <div className="stage-loading">
-                      <div className="spinner"></div>
-                      <span>Running Stage 3: Final synthesis...</span>
-                    </div>
-                  )}
-                  {msg.stage3 && (
-                    <Stage3
-                      finalResponse={msg.stage3}
-                      onRerun={() => onRerunStage3?.()}
-                      disabled={isLoading || rerunStage3Loading}
-                      loading={rerunStage3Loading}
-                    />
-                  )}
-                  {(() => {
-                    const isLastAssistant = index === conversation.messages.length - 1 && msg.role === 'assistant';
-                    if (!isLastAssistant || !msg.stage3) return null;
-                    const userMsg = conversation.messages[index - 1];
-                    return (
-                      <div className="stage-loading" style={{ marginTop: 12, fontStyle: 'normal', flexWrap: 'wrap' }} role="status" aria-live="polite">
-                        <span style={{ fontWeight: 600, color: 'var(--color-success)' }}>Process Completed</span>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
-                          <button
-                            className="btn"
-                            onClick={() => handleDownload('json', msg, userMsg)}
-                            disabled={downloadLoading.json}
-                            aria-label="Download results as JSON"
-                            aria-busy={downloadLoading.json}
-                            title="Download JSON"
-                          >
-                            <span aria-hidden="true">{`{}`}</span>
-                            {downloadLoading.json ? 'Preparing…' : 'JSON'}
-                            {downloadLoading.json && <span className="spinner" style={{ width: 16, height: 16 }} />}
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={() => handleDownload('yaml', msg, userMsg)}
-                            disabled={downloadLoading.yaml}
-                            aria-label="Download results as YAML"
-                            aria-busy={downloadLoading.yaml}
-                            title="Download YAML"
-                          >
-                            <span aria-hidden="true">📄</span>
-                            {downloadLoading.yaml ? 'Preparing…' : 'YAML'}
-                            {downloadLoading.yaml && <span className="spinner" style={{ width: 16, height: 16 }} />}
-                          </button>
-                          <button
-                            className="btn"
-                            onClick={() => handleDownload('md', msg, userMsg)}
-                            disabled={downloadLoading.md}
-                            aria-label="Download results as Markdown"
-                            aria-busy={downloadLoading.md}
-                            title="Download Markdown"
-                          >
-                            <span aria-hidden="true">#</span>
-                            {downloadLoading.md ? 'Preparing…' : 'Markdown'}
-                            {downloadLoading.md && <span className="spinner" style={{ width: 16, height: 16 }} />}
-                          </button>
-                        </div>
-                        {downloadStatus && <span style={{ marginLeft: 8 }}>{downloadStatus}</span>}
-                        {downloadError && <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>{downloadError}</span>}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  ) : (
+                    <div className="assistant-message">
+                      <div className="message-label">LLM Council</div>
+
+                      {/* Stage 1 */}
+                      {msg.loading?.stage1 && (
+                        <div className="stage-loading">
+                          <div className="spinner"></div>
+                          <span>Running Stage 1: Collecting individual responses...</span>
+                        </div>
+                      )}
+                      {msg.stage1 && (
+                        <Stage1
+                          responses={msg.stage1}
+                          onRerun={(model) => onRerunStage1Model?.(model)}
+                          disabled={isLoading}
+                          loadingModel={rerunStage1ModelLoading}
+                        />
+                      )}
+
+                      {/* Stage 2 */}
+                      {msg.loading?.stage2 && (
+                        <div className="stage-loading">
+                          <div className="spinner"></div>
+                          <span>Running Stage 2: Peer rankings...</span>
+                        </div>
+                      )}
+                      {msg.stage2 && (
+                        <Stage2
+                          rankings={msg.stage2}
+                          labelToModel={msg.metadata?.label_to_model}
+                          aggregateRankings={msg.metadata?.aggregate_rankings}
+                          onRerun={(model) => onRerunStage2Model?.(model)}
+                          disabled={isLoading}
+                          loadingModel={rerunStage2ModelLoading}
+                        />
+                      )}
+
+                      {(() => {
+                        const canContinueStage2 = msg.stage1 && !msg.stage2;
+                        const canContinueStage3 = msg.stage2 && !msg.stage3;
+                        const canContinue = (msg.paused || executionMode === 'step') && (canContinueStage2 || canContinueStage3);
+                        if (!canContinue) return null;
+                        const nextLabel = canContinueStage2 ? 'Continue to Stage 2' : 'Continue to Stage 3';
+                        return (
+                          <div className="stage-loading" style={{ justifyContent: 'space-between' }}>
+                            <span>Execution paused</span>
+                            <button
+                              className="btn primary"
+                              onClick={() => onContinueNextStage?.()}
+                              disabled={continuing || isLoading}
+                              aria-busy={continuing}
+                            >
+                              {continuing ? 'Continuing…' : nextLabel}
+                            </button>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Stage 3 */}
+                      {msg.loading?.stage3 && (
+                        <div className="stage-loading">
+                          <div className="spinner"></div>
+                          <span>Running Stage 3: Final synthesis...</span>
+                        </div>
+                      )}
+                      {msg.stage3 && (
+                        <Stage3
+                          finalResponse={msg.stage3}
+                          onRerun={() => onRerunStage3?.()}
+                          disabled={isLoading || rerunStage3Loading}
+                          loading={rerunStage3Loading}
+                        />
+                      )}
+                      {(() => {
+                        const isLastAssistant = index === conversation.messages.length - 1 && msg.role === 'assistant';
+                        if (!isLastAssistant || !msg.stage3) return null;
+                        const userMsg = conversation.messages[index - 1];
+                        return (
+                          <div className="stage-loading" style={{ marginTop: 12, fontStyle: 'normal', flexWrap: 'wrap' }} role="status" aria-live="polite">
+                            <span style={{ fontWeight: 600, color: 'var(--color-success)' }}>Process Completed</span>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 'auto' }}>
+                              <button
+                                className="btn"
+                                onClick={() => handleDownload('json', msg, userMsg)}
+                                disabled={downloadLoading.json}
+                                aria-label="Download results as JSON"
+                                aria-busy={downloadLoading.json}
+                                title="Download JSON"
+                              >
+                                <span aria-hidden="true">{`{}`}</span>
+                                {downloadLoading.json ? 'Preparing…' : 'JSON'}
+                                {downloadLoading.json && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={() => handleDownload('yaml', msg, userMsg)}
+                                disabled={downloadLoading.yaml}
+                                aria-label="Download results as YAML"
+                                aria-busy={downloadLoading.yaml}
+                                title="Download YAML"
+                              >
+                                <span aria-hidden="true">📄</span>
+                                {downloadLoading.yaml ? 'Preparing…' : 'YAML'}
+                                {downloadLoading.yaml && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                              </button>
+                              <button
+                                className="btn"
+                                onClick={() => handleDownload('md', msg, userMsg)}
+                                disabled={downloadLoading.md}
+                                aria-label="Download results as Markdown"
+                                aria-busy={downloadLoading.md}
+                                title="Download Markdown"
+                              >
+                                <span aria-hidden="true">#</span>
+                                {downloadLoading.md ? 'Preparing…' : 'Markdown'}
+                                {downloadLoading.md && <span className="spinner" style={{ width: 16, height: 16 }} />}
+                              </button>
+                            </div>
+                            {downloadStatus && <span style={{ marginLeft: 8 }}>{downloadStatus}</span>}
+                            {downloadError && <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>{downloadError}</span>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))
-        )}
+              ))
+            )}
 
-        {isLoading && (
-          <div className="loading-indicator">
-            <div className="spinner"></div>
-            <span>Consulting the council...</span>
-          </div>
-        )}
+            {isLoading && (
+              <div className="loading-indicator">
+                <div className="spinner"></div>
+                <span>Consulting the council...</span>
+              </div>
+            )}
 
-        <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} />
           </div>
 
           {conversation.messages.length === 0 && (

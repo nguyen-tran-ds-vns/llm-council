@@ -142,20 +142,10 @@ async def update_conversation_config_endpoint(conversation_id: str, request: Upd
             m = mid.strip()
             if not m or m in seen:
                 continue
+            if m not in available_ids:
+                raise HTTPException(status_code=400, detail=f"Unknown model: {m}")
             seen.add(m)
             cleaned.append(m)
-
-        # Identify unknowns and only error for newly added unknowns
-        current = conversation.get("council_models") or []
-        current_clean = [str(x).strip() for x in current if isinstance(x, str) and str(x).strip()]
-        current_set = set(current_clean)
-        unknown = [m for m in cleaned if m not in available_ids]
-        newly_added_unknown = [m for m in unknown if m not in current_set]
-        if newly_added_unknown:
-            raise HTTPException(status_code=400, detail=f"Unknown model: {newly_added_unknown[0]}")
-
-        # Drop any unknowns that were lingering from old config
-        cleaned = [m for m in cleaned if m in available_ids]
         updates["council_models"] = cleaned
     if request.chairman_model is not None:
         cm = request.chairman_model.strip()

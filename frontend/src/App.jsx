@@ -17,6 +17,7 @@ function App() {
   const [rerunStage2ModelLoading, setRerunStage2ModelLoading] = useState(null);
   const [rerunStage3Loading, setRerunStage3Loading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isContinuing, setIsContinuing] = useState(false);
 
   useEffect(() => {
     try {
@@ -29,14 +30,6 @@ function App() {
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      const storedMode = localStorage.getItem('executionMode');
-      const initialMode = storedMode === 'auto' || storedMode === 'step' ? storedMode : 'step';
-      setExecutionMode(initialMode);
-    } catch (_err) { void _err; }
-  }, []);
-
   const handleToggleTheme = () => {
     try {
       const next = theme === 'dark' ? 'light' : 'dark';
@@ -47,12 +40,6 @@ function App() {
       console.error('Failed to toggle theme:', err);
     }
   };
-
-  useEffect(() => {
-    try {
-      if (executionMode) localStorage.setItem('executionMode', executionMode);
-    } catch (_err) { void _err; }
-  }, [executionMode]);
 
   const loadConversations = async () => {
     try {
@@ -361,6 +348,34 @@ function App() {
     }
   };
 
+  const handleContinueNextStage = async () => {
+    if (!currentConversationId || !currentConversation) return;
+    const msgIndex = currentConversation.messages.length - 1;
+    try {
+      setIsContinuing(true);
+      const res = await api.continueStage(currentConversationId, msgIndex);
+      setCurrentConversation((prev) => {
+        const messages = [...prev.messages];
+        const lastMsg = messages[messages.length - 1];
+        if (res.stage === 'stage2') {
+          lastMsg.stage2 = res.data;
+          lastMsg.metadata = res.metadata;
+          lastMsg.paused = true;
+          lastMsg.pausedStage = 'stage2';
+        } else if (res.stage === 'stage3') {
+          lastMsg.stage3 = res.data;
+          lastMsg.paused = false;
+          lastMsg.pausedStage = null;
+        }
+        return { ...prev, messages };
+      });
+    } catch (error) {
+      console.error('Failed to continue next stage:', error);
+    } finally {
+      setIsContinuing(false);
+    }
+  };
+
   return (
     <div className="app">
       <Sidebar
@@ -392,6 +407,8 @@ function App() {
         rerunStage3Loading={rerunStage3Loading}
         resetting={isResetting}
         onRefreshConversation={() => currentConversationId && loadConversation(currentConversationId)}
+        onContinueNextStage={handleContinueNextStage}
+        continuing={isContinuing}
       />
       
     </div>

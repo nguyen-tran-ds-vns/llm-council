@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 
-export default function ConversationConfigPanel({ conversation, onUpdated, onSavingChange }) {
-  const [expanded, setExpanded] = useState(false);
+export default function ConversationConfigPanel({ conversation, onUpdated, onSavingChange, embedded = false }) {
+  const [expanded, setExpanded] = useState(embedded ? true : false);
   const [modelsCatalog, setModelsCatalog] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(null);
@@ -12,21 +12,24 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const cacheKey = 'openrouter.models.cache';
+  const [chairmanFocused, setChairmanFocused] = useState(false);
 
   useEffect(() => {
+    if (embedded) return;
     const key = `configPanel:${conversation?.id}`;
     try {
       const raw = localStorage.getItem(key);
       setExpanded(raw === '1' ? true : false);
     } catch (_err) { void _err; }
-  }, [conversation?.id]);
+  }, [conversation?.id, embedded]);
 
   useEffect(() => {
+    if (embedded) return;
     const key = `configPanel:${conversation?.id}`;
     try {
       localStorage.setItem(key, expanded ? '1' : '0');
     } catch (_err) { void _err; }
-  }, [expanded, conversation?.id]);
+  }, [expanded, conversation?.id, embedded]);
 
   useEffect(() => {
     setCouncilModels(conversation?.council_models || []);
@@ -96,7 +99,7 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
       onUpdated?.();
     } catch (e) {
       void e;
-      setStatus(`Save failed${e?.message ? `: ${e.message}` : ''}`);
+      setStatus('Save failed');
     } finally {
       setSaving(false);
     }
@@ -113,7 +116,7 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
       onUpdated?.();
     } catch (e) {
       void e;
-      setStatus(`Save failed${e?.message ? `: ${e.message}` : ''}`);
+      setStatus('Save failed');
     } finally {
       setSaving(false);
     }
@@ -121,6 +124,7 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
 
   const saveChairman = async (id) => {
     const cm = String(id || '').trim();
+    setChairmanFocused(false);
     setSaving(true);
     setStatus('');
     try {
@@ -130,26 +134,28 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
       onUpdated?.();
     } catch (e) {
       void e;
-      setStatus(`Save failed${e?.message ? `: ${e.message}` : ''}`);
+      setStatus('Save failed');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="config-panel" style={{ borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)', padding: 8 }}>
-      <button
-        className="btn"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        aria-controls={`config-${conversation?.id}`}
-        title={expanded ? 'Hide configuration' : 'Show configuration'}
-        style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-      >
-        <span>{expanded ? '▾' : '▸'}</span>
-        <span>Configuration</span>
-      </button>
-      {expanded && (
+    <div className="config-panel" style={{ borderTop: embedded ? undefined : '1px solid var(--border-color)', background: 'var(--bg-elev)', padding: embedded ? 0 : 8 }}>
+      {!embedded && (
+        <button
+          className="btn"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-controls={`config-${conversation?.id}`}
+          title={expanded ? 'Hide configuration' : 'Show configuration'}
+          style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+        >
+          <span>{expanded ? '▾' : '▸'}</span>
+          <span>Configuration</span>
+        </button>
+      )}
+      {(embedded ? true : expanded) && (
         <div id={`config-${conversation?.id}`} style={{ marginTop: 8, display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 600 }}>Council Models</span>
@@ -161,7 +167,7 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
               <span>No models configured</span>
             ) : (
               (councilModels || []).map(m => (
-                <div key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--color-border)', borderRadius: 6, padding: '4px 8px', background: 'var(--color-bg)' }}>
+                <div key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 8px' }}>
                   <span>{m}</span>
                   <button className="icon-button" onClick={() => removeModel(m)} disabled={saving} aria-label={`Remove ${m}`}>✕</button>
                 </div>
@@ -178,7 +184,7 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
               aria-label="Add council model"
             />
             {filtered.length > 0 && (
-              <div role="listbox" className="dropdown" style={{ position: 'absolute', zIndex: 30, left: 0, right: 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 6, marginTop: 4, maxHeight: 240, overflow: 'auto', boxShadow: 'var(--shadow-sm)' }}>
+              <div role="listbox" className="dropdown" style={{ position: 'absolute', zIndex: 1000, left: 0, right: 0, background: 'var(--bg-elev)', border: '1px solid var(--border-color)', borderRadius: 6, marginTop: 4, maxHeight: 240, overflow: 'auto', boxShadow: 'var(--shadow-md)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
                 {filtered.map((m) => (
                   <div key={m.id} role="option" className="dropdown-item" style={{ padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onMouseDown={(e) => e.preventDefault()} onClick={() => addModel(m.id)}>
                     <span>{m.id}</span>
@@ -196,6 +202,8 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
             <input
               value={chairmanModel || ''}
               onChange={(e) => setChairmanModel(e.target.value)}
+              onFocus={() => setChairmanFocused(true)}
+              onBlur={() => setTimeout(() => setChairmanFocused(false), 80)}
               placeholder={catalogLoading ? 'Loading models…' : (catalogError ? 'Catalog unavailable' : 'Select chairman…')}
               disabled={saving || catalogLoading}
               className="input"
@@ -209,11 +217,11 @@ export default function ConversationConfigPanel({ conversation, onUpdated, onSav
             {(() => {
               const q = String(chairmanModel || '').trim().toLowerCase();
               const list = q ? modelsCatalog.filter(m => String(m.id).toLowerCase().includes(q)).slice(0, 10) : [];
-              if (!q || list.length === 0) return null;
+              if (!q || !chairmanFocused || list.length === 0) return null;
               return (
-                <div role="listbox" className="dropdown" style={{ position: 'absolute', zIndex: 30, left: 0, right: 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 6, marginTop: 4, maxHeight: 240, overflow: 'auto', boxShadow: 'var(--shadow-sm)' }}>
+                <div role="listbox" className="dropdown" style={{ position: 'absolute', zIndex: 1000, left: 0, right: 0, background: 'var(--bg-elev)', border: '1px solid var(--border-color)', borderRadius: 6, marginTop: 4, maxHeight: 240, overflow: 'auto', boxShadow: 'var(--shadow-md)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
                   {list.map((m) => (
-                    <div key={m.id} role="option" className="dropdown-item" style={{ padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onMouseDown={(e) => e.preventDefault()} onClick={() => saveChairman(m.id)}>
+                    <div key={m.id} role="option" className="dropdown-item" style={{ padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onMouseDown={(e) => e.preventDefault()} onClick={() => { saveChairman(m.id); setChairmanFocused(false); }}>
                       <span>{m.id}</span>
                       <span style={{ fontSize: 'var(--font-size-sm)', opacity: 0.7 }}>{m.context_length ? `${m.context_length}` : ''}</span>
                     </div>
